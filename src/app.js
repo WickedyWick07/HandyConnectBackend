@@ -12,7 +12,7 @@ const server = http.createServer(app);
 // Initialize Socket.IO with the HTTP server
 const io = require('socket.io')(server, {
     cors: {
-        origin: "http://localhost:5173" || "https://handyconnect.netlify.app/",
+        origin: ["http://localhost:5173", "https://handyconnect.netlify.app/"],
         methods: ["GET", "POST"],
         allowedHeaders: 'Content-Type,Authorization'
     }
@@ -21,7 +21,7 @@ const io = require('socket.io')(server, {
 app.use(express.json());
 
 const corsOptions = { 
-    origin: 'http://localhost:5173' || "https://handyconnect.netlify.app/",
+    origin: ['http://localhost:5173', "https://handyconnect.netlify.app/"],
     methods: "GET,POST,PUT,DELETE,PATCH",
     allowedHeaders: 'Content-Type,Authorization'
 };
