@@ -10,21 +10,51 @@ const http = require('http');
 const server = http.createServer(app);
 
 // Initialize Socket.IO with the HTTP server
-const io = require('socket.io')(server, {
+const io = require("socket.io")(server, {
     cors: {
-        origin: ["http://localhost:5173", "https://handyconnect.netlify.app"],
+        origin: function (origin, callback) {
+            if (!origin) return callback(null, true);
+
+            if (
+                allowedOrigins.includes(origin) ||
+                previewRegex.test(origin)
+            ) {
+                return callback(null, true);
+            }
+
+            callback(new Error("Not allowed by Socket.IO CORS"));
+        },
         methods: ["GET", "POST"],
-        allowedHeaders: 'Content-Type,Authorization'
-    }
+        allowedHeaders: ["Content-Type", "Authorization"],
+    },
 });
 
 app.use(express.json());
+const allowedOrigins = [
+    "http://localhost:5173",
+    "https://handyconnect.netlify.app",
+];
 
-const corsOptions = { 
-    origin: ['http://localhost:5173', "https://handyconnect.netlify.app"],
-    methods: "GET,POST,PUT,DELETE,PATCH",
-    allowedHeaders: 'Content-Type,Authorization'
+const previewRegex = /^https:\/\/deploy-preview-\d+--handyconnect\.netlify\.app$/;
+
+const corsOptions = {
+    origin: function (origin, callback) {
+        // Allow requests with no Origin header (Postman, server-to-server, etc.)
+        if (!origin) return callback(null, true);
+
+        if (
+            allowedOrigins.includes(origin) ||
+            previewRegex.test(origin)
+        ) {
+            return callback(null, true);
+        }
+
+        callback(new Error("Not allowed by CORS"));
+    },
+    methods: ["GET", "POST", "PUT", "DELETE", "PATCH"],
+    allowedHeaders: ["Content-Type", "Authorization"],
 };
+
 app.use(cors(corsOptions));
 app.set('io', io);
 
