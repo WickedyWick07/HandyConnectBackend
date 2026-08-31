@@ -25,9 +25,6 @@ const deleteConversation = async (req, res) => {
 const createChat = async (req, res) => {
     try {
         const { senderId, receiverId, message, attachment, context } = req.body;
-       
-
-
 
         if (!senderId || !receiverId) {
             return res.status(400).json({ message: 'Missing required fields: senderId and receiverId' });
@@ -42,10 +39,14 @@ const createChat = async (req, res) => {
             context: context, // Directly match the string
         });
 
+        // Capture this BEFORE conversation gets reassigned below —
+        // this is what tells the frontend a brand-new chat thread was created.
+        const wasNewConversation = !conversation;
+
         if (!conversation) {
             conversation = await Conversation.create({
                 participants: [senderId, receiverId],
-                context:context, // Ensure proper structure
+                context: context, // Ensure proper structure
                 lastMessage: message || null,
                 lastMessageAt: message ? new Date() : null,
                 unreadCount: new Map([[receiverId.toString(), message ? 1 : 0]])
@@ -66,10 +67,28 @@ const createChat = async (req, res) => {
                 message,
                 attachment,
             });
+        }
 
-            const io = req.app.get('io');
-            if (io) {
-                io.to(receiverId).emit('receive_message', {
+        // --- Socket notifications ---
+        // Rooms are joined by userId in server.js's `register` handler, so we
+        // always target rooms by the string form of the user's Mongo ID.
+        const io = req.app.get('io');
+        if (io) {
+            const senderRoom = senderId.toString();
+            const receiverRoom = receiverId.toString();
+
+            // Tell BOTH participants a new conversation thread exists, so their
+            // conversation lists can insert it without needing a page refresh.
+            if (wasNewConversation) {
+                const conversationPayload = conversation.toObject ? conversation.toObject() : conversation;
+                io.to(senderRoom).to(receiverRoom).emit('new_conversation', conversationPayload);
+            }
+
+            // Tell BOTH participants about the new message (previously only the
+            // receiver was notified, and the sender's other sessions/tabs never
+            // got a live update).
+            if (chat) {
+                io.to(senderRoom).to(receiverRoom).emit('receive_message', {
                     ...chat.toObject(),
                     conversationId: conversation._id
                 });
@@ -93,18 +112,16 @@ const createChat = async (req, res) => {
 const fetchParticipantDetails = async (req, res) => {
     try {
         const { participants } = req.body;
-        console.log('Participant IDs:', participants);
-        
+
         if (!participants || !Array.isArray(participants)) {
             return res.status(400).json({
                 message: 'Invalid participants data provided'
             });
         }
 
-        // Add await here and select specific fields you need
         const chatParticipants = await User.find(
             { _id: { $in: participants } },
-            'name email profilePicture' // Add or modify fields as needed
+            'name email profilePicture'
         );
 
         if (!chatParticipants.length) {
@@ -113,8 +130,6 @@ const fetchParticipantDetails = async (req, res) => {
             });
         }
 
-        console.log('Chat participants found:', chatParticipants);
-        
         return res.status(200).json({
             message: 'Successfully fetched the details of participants',
             data: chatParticipants
@@ -127,15 +142,14 @@ const fetchParticipantDetails = async (req, res) => {
         });
     }
 }
+
 const getMessagesByConversation = async (req, res) => {
     try {
         const { chatId } = req.body;
-        
-        const chats = await Chat.find({ conversationId: chatId })
-        .lean();
 
-            console.log(chats.message); // Logs all conversation IDs in the fetched messages
-            
+        const chats = await Chat.find({ conversationId: chatId })
+            .lean();
+
         res.status(200).json({
             success: true,
             data: chats
@@ -149,28 +163,24 @@ const getMessagesByConversation = async (req, res) => {
     }
 };
 
-
-
-
-
 const fetchAllConversations = async (req, res) => {
-
     try {
-        const {userId} = req.body 
+        const { userId } = req.body
         if (!userId) {
             return res.status(400).json({ message: 'User ID is required' });
         }
-    
+
         const conversations = await Conversation.find({
             participants: userId
         })
-        .sort({ lastMessageAt: -1 }) // Sort by most recent message
-        .populate('participants', 'name profilePicture') // Populate basic user info
-        .lean();
-        
-        if(!conversations || conversations.length === 0){
-            return res.status(400).json({message: 'No conversations found'})
+            .sort({ lastMessageAt: -1 }) // Sort by most recent message
+            .populate('participants', 'name profilePicture') // Populate basic user info
+            .lean();
+
+        if (!conversations || conversations.length === 0) {
+            return res.status(400).json({ message: 'No conversations found' });
         }
+
         const conversationsWithUnread = conversations.map(conv => {
             const unreadCount = conv.unreadCount instanceof Map ? conv.unreadCount.get(userId.toString()) : 0;
             return {
@@ -178,28 +188,26 @@ const fetchAllConversations = async (req, res) => {
                 unreadCount: unreadCount || 0,
             };
         });
-        
-        const chats = await Chat.find({conversationId: conversations[0]._id})
-        console.log('Conversations:', conversationsWithUnread); // Debugging
-        console.log('Chats for first conversation:', chats);
 
+        // Fetch last-message context for ALL conversations, not just the first one,
+        // so the conversation list can show a preview for every thread.
+        const conversationIds = conversations.map(c => c._id);
+        const chats = await Chat.find({ conversationId: { $in: conversationIds } })
+            .sort({ createdAt: -1 })
+            .lean();
 
-     res.status(200).json({
+        res.status(200).json({
             success: true,
-            data:{ conversations: conversationsWithUnread, chats:chats}
+            data: { conversations: conversationsWithUnread, chats: chats }
         });
-        
+
     } catch (error) {
         console.log(error.stack)
         return res.status(500).json({
-            message:"error fetching conversations",
+            message: "error fetching conversations",
             error: error.message
-        
         })
-}}
+    }
+}
 
-
-
-
-
- module.exports = { createChat, fetchAllConversations, getMessagesByConversation, deleteConversation, fetchParticipantDetails };
+module.exports = { createChat, fetchAllConversations, getMessagesByConversation, deleteConversation, fetchParticipantDetails };

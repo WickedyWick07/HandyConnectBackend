@@ -9,6 +9,13 @@ const fs = require('fs'); // Add this
 const http = require('http');
 const server = http.createServer(app);
 
+const allowedOrigins = [
+    "http://localhost:5173",
+    "https://handyconnect.netlify.app",
+];
+
+const previewRegex = /^https:\/\/deploy-preview-\d+--handyconnect\.netlify\.app$/;
+
 // Initialize Socket.IO with the HTTP server
 const io = require("socket.io")(server, {
     cors: {
@@ -30,12 +37,6 @@ const io = require("socket.io")(server, {
 });
 
 app.use(express.json());
-const allowedOrigins = [
-    "http://localhost:5173",
-    "https://handyconnect.netlify.app",
-];
-
-const previewRegex = /^https:\/\/deploy-preview-\d+--handyconnect\.netlify\.app$/;
 
 const corsOptions = {
     origin: function (origin, callback) {
@@ -62,22 +63,29 @@ app.set('io', io);
 io.on('connection', (socket) => {
     console.log('A user connected:', socket.id);
 
-    socket.on('disconnect', () => {
-        console.log('User disconnected:', socket.id);
+    // This was previously missing entirely, which is why controller code
+    // like `io.to(receiverId).emit('receive_message', ...)` never reached
+    // anyone: no socket had ever joined a room named after its userId.
+    socket.on('register', ({ userId }) => {
+        if (!userId) {
+            console.warn(`Socket ${socket.id} tried to register without a userId`);
+            return;
+        }
+
+        const room = userId.toString();
+        socket.join(room);
+        socket.data.userId = room; // handy for cleanup/logging on disconnect
+        console.log(`Socket ${socket.id} registered and joined room ${room}`);
     });
 
-    // Add your socket event handlers here
-    socket.on('message', (message) => {
-        console.log('Message received:', message);
-        io.emit('message', message);
+    socket.on('disconnect', () => {
+        console.log('User disconnected:', socket.id, socket.data.userId ? `(room ${socket.data.userId})` : '');
     });
 });
 
 app.get('/', (req, res) => {
     res.send("Api is running");
 });
-
-
 
 const uploadsPath = path.join(__dirname, 'middleware', 'uploads');
 console.log('Static files path:', uploadsPath);
@@ -98,8 +106,6 @@ app.use('/uploads', (req, res, next) => {
     });
 });
 
-
-
 const authRoutes = require('./routes/authRoutes');
 const serviceProviders = require('./routes/serviceProvidersRoutes');
 const chatRoutes = require('./routes/chatRoutes')
@@ -115,6 +121,3 @@ app.use((err, req, res, next) => {
 
 // Export both server and app
 module.exports = { app, server };
-
-
-
