@@ -4,6 +4,7 @@ const Booking = require('../models/Bookings')
 const Chat = require('../models/Chats')
 const Conversation = require('../models/Conversation')
 const mongoose = require('mongoose');
+const { notify } = require('../utils/notify');
 
 const deleteConversation = async (req, res) => {
     try {
@@ -33,20 +34,17 @@ const createChat = async (req, res) => {
             return res.status(400).json({ message: 'Invalid or missing booking ID' });
         }
 
-        // Ensure senderId and receiverId are included in the conversation query
         let conversation = await Conversation.findOne({
             participants: { $all: [senderId, receiverId] },
-            context: context, // Directly match the string
+            context: context,
         });
 
-        // Capture this BEFORE conversation gets reassigned below —
-        // this is what tells the frontend a brand-new chat thread was created.
         const wasNewConversation = !conversation;
 
         if (!conversation) {
             conversation = await Conversation.create({
                 participants: [senderId, receiverId],
-                context: context, // Ensure proper structure
+                context: context,
                 lastMessage: message || null,
                 lastMessageAt: message ? new Date() : null,
                 unreadCount: new Map([[receiverId.toString(), message ? 1 : 0]])
@@ -69,24 +67,17 @@ const createChat = async (req, res) => {
             });
         }
 
-        // --- Socket notifications ---
-        // Rooms are joined by userId in server.js's `register` handler, so we
-        // always target rooms by the string form of the user's Mongo ID.
+        // --- Live socket updates ---
         const io = req.app.get('io');
         if (io) {
             const senderRoom = senderId.toString();
             const receiverRoom = receiverId.toString();
 
-            // Tell BOTH participants a new conversation thread exists, so their
-            // conversation lists can insert it without needing a page refresh.
             if (wasNewConversation) {
                 const conversationPayload = conversation.toObject ? conversation.toObject() : conversation;
                 io.to(senderRoom).to(receiverRoom).emit('new_conversation', conversationPayload);
             }
 
-            // Tell BOTH participants about the new message (previously only the
-            // receiver was notified, and the sender's other sessions/tabs never
-            // got a live update).
             if (chat) {
                 io.to(senderRoom).to(receiverRoom).emit('receive_message', {
                     ...chat.toObject(),
@@ -95,12 +86,29 @@ const createChat = async (req, res) => {
             }
         }
 
+        // --- Bell notification for the receiver (only when a real message was sent) ---
+        if (chat) {
+            try {
+                const sender = await User.findById(senderId).select('firstName lastName').lean();
+                const senderName =
+                    [sender?.firstName, sender?.lastName].filter(Boolean).join(' ') || 'Someone';
+                const preview = message.length > 80 ? `${message.slice(0, 80)}...` : message;
+
+                await notify({
+                    userId: receiverId,
+                    type: 'message',
+                    title: `New message from ${senderName}`,
+                    message: preview,
+                    link: '/messages',
+                });
+            } catch (notifyErr) {
+                console.error('Message notification failed:', notifyErr.message);
+            }
+        }
+
         res.status(201).json({
             success: true,
-            data: {
-                chat,
-                conversation
-            }
+            data: { chat, conversation }
         });
 
     } catch (error) {

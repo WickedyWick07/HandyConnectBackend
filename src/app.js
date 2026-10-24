@@ -4,6 +4,7 @@ require('dotenv').config();
 const path = require('path');
 const app = express();
 const fs = require('fs'); // Add this
+const { setIO } = require('./utils/socketStore');
 
 // Create HTTP server using Express app
 const http = require('http');
@@ -58,6 +59,12 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 app.set('io', io);
+setIO(io);
+
+app.use((req, res, next) => {
+  console.log('REQ', req.method, req.originalUrl);
+  next();
+});
 
 // Socket.IO connection handling
 io.on('connection', (socket) => {
@@ -107,10 +114,14 @@ app.use('/uploads', (req, res, next) => {
 });
 
 const authRoutes = require('./routes/authRoutes');
+const notificationRoutes = require('./routes/notificationRoutes');
 const serviceProviders = require('./routes/serviceProvidersRoutes');
 const chatRoutes = require('./routes/chatRoutes')
 const userSettings = require('./routes/userSettings')
+const adminRoutes = require('./routes/adminRoutes');
 app.use('/api/auth', authRoutes);
+app.use('/api/notifications', notificationRoutes);   // ← add this
+app.use('/api/admin', adminRoutes);
 app.use('/api', serviceProviders);
 app.use('/api', chatRoutes)
 app.use('/api', userSettings)

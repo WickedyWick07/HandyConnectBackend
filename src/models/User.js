@@ -7,7 +7,7 @@ const userSchema = new mongoose.Schema({
     password: {type:String, required:true, unique:true},
     email: {type:String, required:true},
     location:{type:String, required:true},
-    role: {type:String, enum:['customer', 'service provider'], default: 'customer'},
+    role: {type:String, enum:['customer', 'service provider', 'admin'], default: 'customer'},
     longitude: { type: Number },  // Store longitude directly
     latitude: { type: Number },  // Store latitude directly
     },{timestamps: true})

@@ -2,7 +2,7 @@ const User = require('../models/User');
 const ServiceProviders = require('../models/ServiceProvider');
 const Booking = require('../models/Bookings');
 const sendEmail = require('../utils/mailer')
-
+const { notify } = require('../utils/notify');
 
 const notifyUser = (email) => {
     const to = email
@@ -33,38 +33,48 @@ const fetchAllSP = async (req, res) => {
 };
 
 const submitBooking = async (req, res) => {
+    console.log('>>> SUBMIT BOOKING HIT');
     try {
-        // Extract fields from request body
         const { service, date, time, problem_description, service_provider, user, location } = req.body;
 
-        // Validate required fields
         if (!service || !date || !time || !service_provider || !user || !location) {
-            console.log('Missing required fields:', { service, date, time, service_provider, user, location });
             return res.status(400).json({ message: "All required fields must be provided" });
         }
 
-        // Create the booking
         const booking = await Booking.create({
-            service,
-            date,
-            time,
-            problem_description,
-            service_provider,
-            user,
-            location
+            service, date, time, problem_description, service_provider, user, location
         });
 
-        // Send success response
+        // Notify the provider (never let this break the booking itself)
+        try {
+            const [provider, customer] = await Promise.all([
+                ServiceProviders.findById(service_provider).select('user companyName'),
+                User.findById(user).select('firstName lastName').lean(),
+            ]);
+
+            const customerName =
+                [customer?.firstName, customer?.lastName].filter(Boolean).join(' ') || 'A customer';
+
+            if (provider?.user) {
+                await notify({
+                    userId: provider.user,
+                    type: 'appointment',
+                    title: 'New booking request',
+                    message: `${customerName} requested ${service} on ${date} at ${time}`,
+                    link: '/provider-bookings',
+                });
+            }
+        } catch (notifyErr) {
+            console.error('Notification step failed:', notifyErr.message);
+        }
+
         return res.status(201).json({
             message: "Booking Created Successfully",
             data: booking
         });
 
     } catch (error) {
-        // Log the full error for debugging
         console.error('Booking creation error:', error);
-        
-        // Send error response
         return res.status(500).json({
             message: "Failed to create Booking",
             error: error.message
@@ -74,38 +84,53 @@ const submitBooking = async (req, res) => {
 
 const statusUpdate = async (req, res) => {
     try {
-        const {status, bookingId} = req.body
+        const { status, bookingId } = req.body;
 
-        if(!status || !bookingId){
-            return res.status(404).json({message:'Status not found in payload'})
-        } 
-        console.log('status:', status)
-        console.log('booking:', bookingId)
+        if (!status || !bookingId) {
+            return res.status(400).json({ message: 'Status or bookingId missing' });
+        }
 
         const validStatuses = ['pending', 'accepted', 'completed', 'declined'];
         if (!validStatuses.includes(status)) {
-        return res.status(400).json({ message: 'Invalid status value' });
+            return res.status(400).json({ message: 'Invalid status value' });
         }
 
-        
         const booking = await Booking.findByIdAndUpdate(
             bookingId,
-            {status},
-            {new:true}
-        ).lean()
-        if(!booking){
-        return res.status(404).json({message: 'Cannot find booking'})
+            { status },
+            { new: true }
+        ).lean();
+
+        if (!booking) {
+            return res.status(404).json({ message: 'Cannot find booking' });
         }
-        console.log('Updated Booking:', booking);
 
+        try {
+            const provider = await ServiceProviders.findById(booking.service_provider).select('companyName');
+            const statusText = {
+                accepted: 'accepted',
+                declined: 'declined',
+                completed: 'marked as completed',
+                pending: 'set back to pending',
+            }[status];
 
-        return res.status(200).json({message:'Succesfully updated status', data:booking})
+            await notify({
+                userId: booking.user,
+                type: 'appointment',
+                title: `Booking ${status}`,
+                message: `${provider?.companyName || 'Your provider'} ${statusText} your ${booking.service} booking`,
+                link: '/all-bookings',
+            });
+        } catch (notifyErr) {
+            console.error('Notification step failed:', notifyErr.message);
+        }
+
+        return res.status(200).json({ message: 'Successfully updated status', data: booking });
     } catch (error) {
-        console.log(error.stack)
-        return res.status(500).json({message:'Error updating status'})
+        console.log(error.stack);
+        return res.status(500).json({ message: 'Error updating status' });
     }
-  }
-
+};
 const fetchCustomerBookings = async (req,res) => {
     try{
         console.log(req.body)
