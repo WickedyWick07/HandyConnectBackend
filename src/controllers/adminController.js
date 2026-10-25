@@ -5,6 +5,7 @@ const Conversation = require('../models/Conversation');
 const Chat = require('../models/Chats');
 const Notification = require('../models/Notifications');
 const { notify } = require('../utils/notify');
+const Review = require('../models/Review');
 
 // GET /api/admin/stats
 const getStats = async (req, res) => {
@@ -169,6 +170,7 @@ const deleteUser = async (req, res) => {
             Booking.deleteMany({ $or: bookingFilter }),
             Chat.deleteMany({ conversationId: { $in: conversationIds } }),
             Conversation.deleteMany({ _id: { $in: conversationIds } }),
+            Review.deleteMany({ $or: provider ? [{ customer: target._id }, { provider: provider._id }] : [{ customer: target._id }] }),
             Notification.deleteMany({ user: target._id }),
             provider ? ServiceProvider.deleteOne({ _id: provider._id }) : Promise.resolve(),
         ]);
