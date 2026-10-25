@@ -119,9 +119,11 @@ const serviceProviders = require('./routes/serviceProvidersRoutes');
 const chatRoutes = require('./routes/chatRoutes')
 const userSettings = require('./routes/userSettings')
 const adminRoutes = require('./routes/adminRoutes');
+const reviewRoutes = require('./routes/reviewRoutes');
 app.use('/api/auth', authRoutes);
 app.use('/api/notifications', notificationRoutes);   // ← add this
 app.use('/api/admin', adminRoutes);
+app.use('/api/reviews', reviewRoutes);        // ← add this
 app.use('/api', serviceProviders);
 app.use('/api', chatRoutes)
 app.use('/api', userSettings)
