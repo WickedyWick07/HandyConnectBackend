@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 
-const STATUS_ENUM = ['pending', 'accepted', 'completed', 'declined'];
+const STATUS_ENUM = ['pending', 'accepted', 'completed', 'declined','incomplete'];
 const ServiceBookingSchema = new mongoose.Schema({
     user: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
     service_provider: { type: mongoose.Schema.Types.ObjectId, ref: 'ServiceProvider', required: true },

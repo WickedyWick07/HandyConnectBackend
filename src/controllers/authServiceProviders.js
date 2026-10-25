@@ -90,9 +90,33 @@ const statusUpdate = async (req, res) => {
             return res.status(400).json({ message: 'Status or bookingId missing' });
         }
 
-        const validStatuses = ['pending', 'accepted', 'completed', 'declined'];
+        const validStatuses = ['pending', 'accepted', 'completed', 'declined', 'incomplete'];
         if (!validStatuses.includes(status)) {
             return res.status(400).json({ message: 'Invalid status value' });
+        }
+
+        const existing = await Booking.findById(bookingId).lean();
+        if (!existing) {
+            return res.status(404).json({ message: 'Cannot find booking' });
+        }
+
+        // Only the provider who owns this booking may change it
+        const userId = req.user?.id || req.user?._id || req.user?.userId;
+        const myProfile = await ServiceProviders.findOne({ user: userId }).select('_id');
+        if (!myProfile || String(existing.service_provider) !== String(myProfile._id)) {
+            return res.status(403).json({ message: 'This booking is not yours' });
+        }
+
+        // Allowed moves
+        const allowed = {
+            pending: ['accepted', 'declined'],
+            accepted: ['completed', 'incomplete'],
+            completed: ['accepted'],     // reopen
+            incomplete: ['accepted'],    // reopen
+            declined: ['accepted'],
+        };
+        if (!(allowed[existing.status] || []).includes(status)) {
+            return res.status(400).json({ message: `Cannot change a ${existing.status} booking to ${status}` });
         }
 
         const booking = await Booking.findByIdAndUpdate(
@@ -101,16 +125,13 @@ const statusUpdate = async (req, res) => {
             { new: true }
         ).lean();
 
-        if (!booking) {
-            return res.status(404).json({ message: 'Cannot find booking' });
-        }
-
         try {
             const provider = await ServiceProviders.findById(booking.service_provider).select('companyName');
             const statusText = {
                 accepted: 'accepted',
                 declined: 'declined',
                 completed: 'marked as completed',
+                incomplete: 'marked as incomplete',
                 pending: 'set back to pending',
             }[status];
 
@@ -131,6 +152,7 @@ const statusUpdate = async (req, res) => {
         return res.status(500).json({ message: 'Error updating status' });
     }
 };
+
 const fetchCustomerBookings = async (req,res) => {
     try{
         console.log(req.body)
