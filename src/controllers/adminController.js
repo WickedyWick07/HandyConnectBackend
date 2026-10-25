@@ -6,6 +6,19 @@ const Chat = require('../models/Chats');
 const Notification = require('../models/Notifications');
 const { notify } = require('../utils/notify');
 const Review = require('../models/Review');
+const fs = require('fs');
+const path = require('path');
+
+const UPLOADS_DIR = path.join(__dirname, '..', 'middleware', 'uploads');
+const toDbPath = (file) => `/uploads/${file.filename}`;
+
+// Best-effort delete of the old file from disk (never throws)
+const removeFromDisk = (dbPath) => {
+    try {
+        if (!dbPath || !dbPath.startsWith('/uploads/')) return;
+        fs.unlinkSync(path.join(UPLOADS_DIR, path.basename(dbPath)));
+    } catch { /* file may already be missing, that's fine */ }
+};
 
 // GET /api/admin/stats
 const getStats = async (req, res) => {
@@ -184,4 +197,90 @@ const deleteUser = async (req, res) => {
     }
 };
 
-module.exports = { getStats, getCustomers, getProviders, getActiveJobs, setVerified, deleteUser };
+// POST /api/admin/providers/:id/certifications   (multipart: files[])
+const addCertifications = async (req, res) => {
+    try {
+        if (!req.files?.length) return res.status(400).json({ message: 'No files uploaded' });
+
+        const provider = await ServiceProvider.findByIdAndUpdate(
+            req.params.id,
+            { $push: { certifications: { $each: req.files.map(toDbPath) } } },
+            { new: true }
+        );
+        if (!provider) return res.status(404).json({ message: 'Provider not found' });
+
+        res.json({ message: 'Certifications added', data: provider });
+    } catch (err) {
+        console.error(err.stack);
+        res.status(500).json({ message: 'Failed to add certifications' });
+    }
+};
+
+// PUT /api/admin/providers/:id/certifications   (multipart: file, body.old)
+const replaceCertification = async (req, res) => {
+    try {
+        const { old } = req.body;
+        if (!req.file || !old) return res.status(400).json({ message: 'File and old path are required' });
+
+        const provider = await ServiceProvider.findById(req.params.id);
+        if (!provider) return res.status(404).json({ message: 'Provider not found' });
+
+        const idx = provider.certifications.indexOf(old);
+        if (idx === -1) return res.status(404).json({ message: 'Certification not found' });
+
+        provider.certifications[idx] = toDbPath(req.file);
+        await provider.save();
+        removeFromDisk(old);
+
+        res.json({ message: 'Certification replaced', data: provider });
+    } catch (err) {
+        console.error(err.stack);
+        res.status(500).json({ message: 'Failed to replace certification' });
+    }
+};
+
+// DELETE /api/admin/providers/:id/certifications   body: { path }
+const removeCertification = async (req, res) => {
+    try {
+        const { path: certPath } = req.body;
+        if (!certPath) return res.status(400).json({ message: 'path is required' });
+
+        const provider = await ServiceProvider.findByIdAndUpdate(
+            req.params.id,
+            { $pull: { certifications: certPath } },
+            { new: true }
+        );
+        if (!provider) return res.status(404).json({ message: 'Provider not found' });
+
+        removeFromDisk(certPath);
+        res.json({ message: 'Certification removed', data: provider });
+    } catch (err) {
+        console.error(err.stack);
+        res.status(500).json({ message: 'Failed to remove certification' });
+    }
+};
+
+// PUT /api/admin/providers/:id/profile-picture   (multipart: file)
+const replaceProfilePicture = async (req, res) => {
+    try {
+        if (!req.file) return res.status(400).json({ message: 'No file uploaded' });
+
+        const provider = await ServiceProvider.findById(req.params.id);
+        if (!provider) return res.status(404).json({ message: 'Provider not found' });
+
+        const old = provider.profilePicture;
+        provider.profilePicture = toDbPath(req.file);
+        await provider.save();
+        removeFromDisk(old);
+
+        res.json({ message: 'Profile picture updated', data: provider });
+    } catch (err) {
+        console.error(err.stack);
+        res.status(500).json({ message: 'Failed to update profile picture' });
+    }
+};
+
+module.exports = {
+    getStats, getCustomers, getProviders, getActiveJobs, setVerified, deleteUser,
+    addCertifications, replaceCertification, removeCertification, replaceProfilePicture,
+};
